@@ -587,7 +587,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 void
 vmprint(pagetable_t pagetable) {
 
-  printf("pagetable %p\n", pagetable);
+  printf("page table %p\n", pagetable);
   print_page(pagetable,2,SIGN_EXTEND(0));
   return;
 }
@@ -602,12 +602,12 @@ print_page(pagetable_t pagetable, int level, uint64 base) {
     if((pte & PTE_V) == 0){
       continue;
     }
-    uint64 va = base + ((uint64)-i << PXSHIFT(level));
+    uint64 va = base + (i << PXSHIFT(level));
 
     uint64 pa = PTE2PA(pte);
 
     print_indent(level);
-    printf("..%p: pte %p pa %p\n", (void*)va, (void*)pte, (void*)pa);
+    printf(" ..%p: pte %p pa %p\n", (void*)va, (void*)pte, (void*)pa);
 
 
       // this PTE points to a lower-level page table.
@@ -623,7 +623,7 @@ print_page(pagetable_t pagetable, int level, uint64 base) {
 
 void print_indent(int level) {
   for (int i = level; i < 2; i++) {
-    printf(".. ");
+    printf(" ..");
   }
 }
 
