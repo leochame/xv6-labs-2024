@@ -17,6 +17,9 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+void print_indent(int level);
+void print_page(pagetable_t pagetable, int level,uint64 addr);
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -490,11 +493,46 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 #ifdef LAB_PGTBL
 void
 vmprint(pagetable_t pagetable) {
-  // your code here
+
+  printf("pagetable %p\n", pagetable);
+  print_page(pagetable,2,SIGN_EXTEND(0));
+  return;
 }
 #endif
 
+void
+print_page(pagetable_t pagetable, int level, uint64 base) {
+  // todo your code here
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) == 0){
+      continue;
+    }
+    uint64 va = base + ((uint64)-i << PXSHIFT(level));
 
+    uint64 pa = PTE2PA(pte);
+
+    print_indent(level);
+    printf("..%p: pte %p pa %p\n", (void*)va, (void*)pte, (void*)pa);
+
+
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+    // 如果 PTE 指向下级页表，则递归打印
+    if (pte & PTE_V) {
+      if (level > 0) {
+        print_page((pagetable_t)child, level - 1,va);
+      }
+    }
+  }
+}
+
+void print_indent(int level) {
+  for (int i = level; i < 2; i++) {
+    printf(".. ");
+  }
+}
 
 #ifdef LAB_PGTBL
 pte_t*
