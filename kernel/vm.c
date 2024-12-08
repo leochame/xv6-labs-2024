@@ -120,6 +120,25 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   return &pagetable[PX(0, va)];
 }
 
+//得到两级页表项
+pte_t *
+walk_super(pagetable_t pagetable, uint64 va, int alloc)
+{
+  if(va >= MAXVA)
+    panic("walk_super");
+
+  pte_t *pte = &pagetable[PX(2,va)];
+  if(*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+  } else {
+      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+        return 0;
+      memset(pagetable, 0, PGSIZE);
+      *pte = PA2PTE(pagetable) | PTE_V;
+  }
+  return &pagetable[PX(1, va)];
+}
+
 // Look up a virtual address, return the physical address,
 // or 0 if not mapped.
 // Can only be used to look up user pages.
@@ -190,6 +209,28 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   return 0;
 }
 
+int
+mappages_super(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+//  uint64 a, last;
+  pte_t *pte;
+
+  if((va % SUPERPGSIZE) != 0)
+    panic("mappages_super: va not aligned");
+  if((size % SUPERPGSIZE) != 0)
+    panic("mappages_super: size not aligned");
+  if(size == 0)
+    panic("mappages_super: size");
+  //超级页是一块很大的连续的物理内存
+  // 所以不需要多次遍历用一个个4KB大小的页连在一起
+  if((pte = walk_super(pagetable, va, 1)) == 0)
+     return -1;
+  if(*pte & PTE_V)
+     panic("mappages_super: remap");
+  *pte = PA2PTE(pa) | perm | PTE_V | PTE_S | PTE_R;
+  return 0;
+}
+
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
@@ -213,6 +254,17 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
+
+    // 修改一下释放的页表的代码,释放超级页
+    if(*pte & PTE_S){
+      sz = SUPERPGSIZE;
+      if(do_free){
+        uint64 pa = PTE2PA(*pte);
+        superfree((void*)pa);
+      }
+      *pte = 0;
+      continue;
+    }
     if(do_free){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
@@ -276,6 +328,33 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 #endif
     if(mappages(pagetable, a, sz, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
       kfree(mem);
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+  }
+  return newsz;
+}
+
+uint64
+uvmalloc_super(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
+{
+  char *mem;
+  uint64 a;
+  int sz;
+
+  if(newsz < oldsz)
+    return oldsz;
+
+//  oldsz = SUPERPGROUNDUP(oldsz);
+  for(a = oldsz; a < newsz; a += sz){
+    sz = SUPERPGSIZE;
+    mem = superalloc();
+    if(mem == 0){
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+    if(mappages_super(pagetable, a, sz, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
+      superfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
@@ -355,6 +434,20 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+
+    if(flags & PTE_S){
+      szinc = SUPERPGSIZE;
+      if((mem = superalloc()) == 0){
+    	  goto err;
+      }
+  	  memmove(mem, (char*)pa, SUPERPGSIZE);
+   	  if(mappages_super(new, i, SUPERPGSIZE, (uint64)mem, flags) != 0){
+      	superfree(mem);
+     	 goto err;
+   	  }
+      continue;
+    }
+
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);

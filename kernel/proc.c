@@ -132,6 +132,7 @@ found:
     return 0;
   }
 
+
   // Allocate an usyscall page
   if((p->usyscall = (struct usyscall *)kalloc()) == 0){
     freeproc(p);
@@ -291,8 +292,27 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+  uint64 oldsz = sz;
+  uint64 newsz = SUPERPGROUNDUP(sz);
+  int spgnum = n/SUPERPGSIZE;
+
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
+    if(spgnum > 0 && sz < newsz){
+      //todo 超级页数量大于0,但是当前地址空间未对齐超级页边界，调用uvmalloc分配Kfree对齐超级页
+      if((newsz = uvmalloc(p->pagetable, sz, newsz, PTE_W)) == 0){
+        return -1;
+      }
+      sz = newsz;
+      p->sz = sz;
+    }
+    if(spgnum > 0 && spgnum < 5){
+      if((newsz = uvmalloc_super(p->pagetable, sz, sz + spgnum * SUPERPGSIZE, PTE_W)) == 0){
+        return -1;
+      }
+      sz = newsz;
+      p->sz = sz;
+    }
+    if((sz = uvmalloc(p->pagetable, sz, oldsz + n, PTE_W)) == 0) {
       return -1;
     }
   } else if(n < 0){
