@@ -176,3 +176,21 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void
+backtrace()
+{
+  uint64 fp = r_fp();
+//  uint64* return_address;
+  printf("backtrace:\n");
+  while( fp != PGROUNDUP(fp) ){
+
+    uint64 return_address = *(uint64*)(fp - 8);
+    printf("%p\n", (void *)return_address);
+
+    // 获取上一个帧指针，位于帧指针的偏移量 -16 处
+    fp = *(uint64*)(fp - 16);
+
+  }
+
+}
