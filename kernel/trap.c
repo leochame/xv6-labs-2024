@@ -67,12 +67,22 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if( r_scause()==15){
+    struct proc* p=myproc();
+    uint64 va=r_stval();
+    if(cow_page(p->pagetable,va) == 0){
+      printf("cow_page fault\n");
+      printf("usertrap(): kalloc failed!pid=%d\n", p->pid);
+      printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
+      setkilled(p);
+      goto err;
+    }
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     setkilled(p);
   }
-
+ err:
   if(killed(p))
     exit(-1);
 
@@ -81,6 +91,43 @@ usertrap(void)
     yield();
 
   usertrapret();
+}
+int
+cow_page(pagetable_t pagetable, uint64 va){
+  if (va >= MAXVA)
+    return 0;
+  pte_t *pte = walk(pagetable, va, 0);
+  if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+    return 0;
+  if (!(*pte & PTE_COW)){
+    printf("usertrap(): write to read-only page\n");
+    return 0;
+  }
+  uint64 pa = PTE2PA(*pte);
+
+  uint flags = PTE_FLAGS(*pte);
+  flags = (flags & ~PTE_COW) | PTE_W;
+    // book p49:This book-keeping allows an important optimization: if a process incurs a store page fault and the
+    //physical page is only referred to from that process’s page table, no copy is needed
+  if (get_ref((void *)pa) == 1)
+  {
+    *pte  &= ~PTE_COW;
+    *pte |= PTE_W;
+    sfence_vma();
+  }else{
+    char *mem = kalloc();
+    if (mem == 0)
+      return 0;
+    memmove(mem, (char *)pa, PGSIZE);
+    uint flags = PTE_FLAGS(*pte);
+    flags &= ~PTE_COW;
+    flags |= PTE_W;
+
+    *pte = PA2PTE(mem) | flags | PTE_V;
+    kfree((void *)pa);
+    sfence_vma();
+  }
+  return 1;
 }
 
 //
